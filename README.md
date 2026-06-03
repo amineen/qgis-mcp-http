@@ -4,11 +4,11 @@ QGIS MCP HTTP exposes the active QGIS desktop session as a localhost-only Stream
 
 The plugin is intended for MCP clients such as Codex, Claude Desktop wrappers, and other local automation tools that need to inspect and control QGIS through a standard MCP endpoint.
 
-## Status
+## Status And Attribution
 
-This repository is prepared for QGIS plugin registry testing. The command handlers are copied from the existing `jjsantos01/qgis_mcp` QGIS plugin implementation so the known-working QGIS tool behavior is preserved while the transport changes from a separate socket/stdout bridge to direct Streamable HTTP.
+This repository is prepared for QGIS plugin registry testing. The command handlers are copied from the existing [`jjsantos01/qgis_mcp`](https://github.com/jjsantos01/qgis_mcp) QGIS plugin implementation, with permission, so the known-working QGIS tool behavior is preserved while the transport changes from a separate socket/stdout bridge to direct Streamable HTTP.
 
-Before submitting to the official QGIS Plugin Repository, confirm the upstream licensing/permission path because the copied upstream project currently does not include a license file.
+This derivative is licensed under GPL-2.0.
 
 ## Install from ZIP
 

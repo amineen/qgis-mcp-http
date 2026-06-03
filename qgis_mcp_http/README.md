@@ -1,13 +1,13 @@
 # QGIS MCP HTTP Plugin
 
-This plugin is a sibling of the original `qgis_mcp_plugin`. It keeps the original plugin untouched and copies its known-working QGIS command handlers, then exposes them through a localhost Streamable HTTP MCP endpoint.
+This plugin copies the known-working QGIS command handlers from the original `jjsantos01/qgis_mcp` plugin implementation, with permission, then exposes them through a localhost Streamable HTTP MCP endpoint.
 
 ## Install in QGIS
 
 For local testing, copy this folder into your active QGIS profile plugins directory:
 
 ```bash
-~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/qgis_mcp_http_plugin
+~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/qgis_mcp_http
 ```
 
 Restart QGIS, then enable **QGIS MCP HTTP** in **Plugins > Manage and Install Plugins**.

@@ -1,3 +1,11 @@
+# QGIS MCP HTTP
+# Copyright (C) 2026 Aaron Mineen
+# Derived with permission from jjsantos01/qgis_mcp.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 as
+# published by the Free Software Foundation.
+
 import os
 import io
 import sys
