@@ -56,6 +56,3 @@ The plugin exposes the same tool surface as the original QGIS MCP command handle
 - `execute_processing`
 - `save_project`
 - `render_map`
-- `execute_code`
-
-`execute_code` can run arbitrary PyQGIS code in the active QGIS session. Treat it as a powerful local automation tool and only expose this server to trusted local MCP clients.

@@ -7,8 +7,6 @@
 # published by the Free Software Foundation.
 
 import os
-import io
-import sys
 import json
 import socket
 import threading
@@ -148,7 +146,6 @@ class QgisMCPServer(QObject):
                 "get_qgis_info": self.get_qgis_info,
                 "load_project": self.load_project,
                 "get_project_info": self.get_project_info,
-                "execute_code": self.execute_code,
                 "add_vector_layer": self.add_vector_layer,
                 "add_raster_layer": self.add_raster_layer,
                 "get_layers": self.get_layers,
@@ -230,61 +227,6 @@ class QgisMCPServer(QObject):
             return "raster"
         else:
             return str(layer.type())
-    
-    def execute_code(self, code, **kwargs):
-        """Execute arbitrary PyQGIS code"""
-
-        # Capture stdout and stderr
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
-        
-        # Store original stdout and stderr
-        original_stdout = sys.stdout
-        original_stderr = sys.stderr
-        
-        try:
-            # Redirect stdout and stderr
-            sys.stdout = stdout_capture
-            sys.stderr = stderr_capture
-            
-            # Create a local namespace for execution
-            namespace = {
-                "qgis": Qgis,
-                "QgsProject": QgsProject,
-                "iface": self.iface,
-                "QgsApplication": QgsApplication,
-                "QgsVectorLayer": QgsVectorLayer,
-                "QgsRasterLayer": QgsRasterLayer,
-                "QgsCoordinateReferenceSystem": QgsCoordinateReferenceSystem
-            }
-            
-            # Execute the code
-            exec(code, namespace)
-            
-            # Restore stdout and stderr
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
-            
-            return {
-                "executed": True,
-                "stdout": stdout_capture.getvalue(),
-                "stderr": stderr_capture.getvalue()
-            }
-        except Exception as e:
-            # Generate full traceback
-            error_traceback = traceback.format_exc()
-            
-            # Restore stdout and stderr in case of exception
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
-            
-            return {
-                "executed": False,
-                "error": str(e),
-                "traceback": error_traceback,
-                "stdout": stdout_capture.getvalue(),
-                "stderr": stderr_capture.getvalue()
-            }
     
     def add_vector_layer(self, path, name=None, provider="ogr", **kwargs):
         """Add a vector layer to the project"""
@@ -527,7 +469,7 @@ class QgisMCPServer(QObject):
 
 
 MCP_SERVER_NAME = "QGIS MCP HTTP"
-MCP_SERVER_VERSION = "0.1.0"
+MCP_SERVER_VERSION = "0.1.1"
 SUPPORTED_MCP_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 
 MCP_TOOLS = [
@@ -665,16 +607,6 @@ MCP_TOOLS = [
                 "height": {"type": "integer", "default": 600, "minimum": 1},
             },
             "required": ["path"],
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "execute_code",
-        "description": "Execute arbitrary PyQGIS code provided as a string.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"code": {"type": "string"}},
-            "required": ["code"],
             "additionalProperties": False,
         },
     },

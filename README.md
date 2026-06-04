@@ -15,7 +15,7 @@ This derivative is licensed under GPL-2.0.
 Create a plugin ZIP with the plugin folder at the top level:
 
 ```bash
-zip -r qgis_mcp_http-0.1.0.zip qgis_mcp_http \
+zip -r qgis_mcp_http-0.1.1.zip qgis_mcp_http \
   -x '*/__pycache__/*' '*.pyc' '*.DS_Store' '*/.git/*'
 ```
 
@@ -58,6 +58,3 @@ Restart Codex after adding the server.
 - `execute_processing`
 - `save_project`
 - `render_map`
-- `execute_code`
-
-`execute_code` can run arbitrary PyQGIS code in the active QGIS session. Only enable this server for trusted local MCP clients.
