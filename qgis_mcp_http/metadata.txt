@@ -12,6 +12,4 @@ repository=https://github.com/amineen/qgis-mcp-http
 tracker=https://github.com/amineen/qgis-mcp-http/issues
 experimental=True
 license=GPL-2.0-only
-
-[about]
 about=QGIS MCP HTTP starts a localhost-only Streamable HTTP MCP endpoint directly inside QGIS. It is a GPL-2.0 derivative, published with permission, of the command handler implementation from jjsantos01/qgis_mcp. It exposes those QGIS tools at /mcp so clients can inspect projects, manage layers, run processing algorithms, render maps, and optionally execute PyQGIS code without a separate local stdio server checkout.
