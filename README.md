@@ -15,7 +15,7 @@ This derivative is licensed under GPL-2.0.
 Create a plugin ZIP with the plugin folder at the top level:
 
 ```bash
-zip -r qgis_mcp_http-0.1.1.zip qgis_mcp_http \
+zip -r qgis_mcp_http-0.3.0.zip qgis_mcp_http \
   -x '*/__pycache__/*' '*.pyc' '*.DS_Store' '*/.git/*'
 ```
 
@@ -54,7 +54,31 @@ Restart Codex after adding the server.
 - `get_layers`
 - `remove_layer`
 - `zoom_to_layer`
+- `zoom_to_extent`
 - `get_layer_features`
+- `get_layer_fields`
+- `get_layer_statistics`
+- `set_layer_visibility`
+- `set_layer_opacity`
+- `rename_layer`
+- `style_layer`
+- `set_graduated_renderer`
+- `select_features_by_expression`
+- `edit_attribute`
+- `run_expression`
 - `execute_processing`
+- `set_project_crs`
+- `create_layout`
+- `add_layout_map`
+- `list_layouts`
+- `add_layout_label`
+- `add_layout_legend`
+- `add_layout_picture`
+- `add_layout_scale_bar`
+- `configure_atlas`
+- `get_atlas_info`
+- `export_layout`
+- `export_atlas`
+- `remove_layout`
 - `save_project`
 - `render_map`

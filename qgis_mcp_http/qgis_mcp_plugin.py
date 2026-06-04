@@ -17,7 +17,7 @@ from qgis.core import *
 from qgis.gui import *
 from qgis.PyQt.QtCore import QObject, pyqtSignal, QTimer, Qt, QSize
 from qgis.PyQt.QtWidgets import QAction, QDockWidget, QVBoxLayout, QLabel, QPushButton, QSpinBox, QWidget
-from qgis.PyQt.QtGui import QIcon, QColor
+from qgis.PyQt.QtGui import QIcon, QColor, QFont
 from qgis.utils import active_plugins
 
 class QgisMCPServer(QObject):
@@ -151,8 +151,32 @@ class QgisMCPServer(QObject):
                 "get_layers": self.get_layers,
                 "remove_layer": self.remove_layer,
                 "zoom_to_layer": self.zoom_to_layer,
+                "zoom_to_extent": self.zoom_to_extent,
                 "get_layer_features": self.get_layer_features,
+                "get_layer_fields": self.get_layer_fields,
+                "get_layer_statistics": self.get_layer_statistics,
+                "set_layer_visibility": self.set_layer_visibility,
+                "set_layer_opacity": self.set_layer_opacity,
+                "rename_layer": self.rename_layer,
+                "style_layer": self.style_layer,
+                "set_graduated_renderer": self.set_graduated_renderer,
+                "select_features_by_expression": self.select_features_by_expression,
+                "edit_attribute": self.edit_attribute,
+                "run_expression": self.run_expression,
                 "execute_processing": self.execute_processing,
+                "set_project_crs": self.set_project_crs,
+                "list_layouts": self.list_layouts,
+                "create_layout": self.create_layout,
+                "add_layout_map": self.add_layout_map,
+                "add_layout_label": self.add_layout_label,
+                "add_layout_legend": self.add_layout_legend,
+                "add_layout_picture": self.add_layout_picture,
+                "add_layout_scale_bar": self.add_layout_scale_bar,
+                "configure_atlas": self.configure_atlas,
+                "get_atlas_info": self.get_atlas_info,
+                "export_atlas": self.export_atlas,
+                "export_layout": self.export_layout,
+                "remove_layout": self.remove_layout,
                 "save_project": self.save_project,
                 "render_map": self.render_map,
                 "create_new_project": self.create_new_project,
@@ -227,6 +251,69 @@ class QgisMCPServer(QObject):
             return "raster"
         else:
             return str(layer.type())
+
+    def _get_layer(self, layer_id):
+        """Return a project layer or raise a helpful error."""
+        layer = QgsProject.instance().mapLayer(layer_id)
+        if not layer:
+            raise Exception(f"Layer not found: {layer_id}")
+        return layer
+
+    def _get_vector_layer(self, layer_id):
+        """Return a vector layer or raise a helpful error."""
+        layer = self._get_layer(layer_id)
+        if layer.type() != QgsMapLayer.VectorLayer:
+            raise Exception(f"Layer is not a vector layer: {layer_id}")
+        return layer
+
+    def _refresh_layer(self, layer):
+        """Refresh a layer and the map canvas after visual changes."""
+        try:
+            layer.triggerRepaint()
+        except Exception as e:
+            QgsMessageLog.logMessage(f"Layer repaint failed: {str(e)}", "QGIS MCP", Qgis.Warning)
+
+        if self.iface:
+            self.iface.mapCanvas().refresh()
+
+    def _parse_color(self, color, fallback="#3388ff"):
+        """Parse a CSS-style color string into QColor."""
+        qcolor = QColor(color or fallback)
+        if not qcolor.isValid():
+            raise Exception(f"Invalid color: {color}")
+        return qcolor
+
+    def _field_index(self, layer, field_name):
+        index = layer.fields().indexFromName(field_name)
+        if index < 0:
+            raise Exception(f"Field not found: {field_name}")
+        return index
+
+    def _layout_by_name(self, name):
+        manager = QgsProject.instance().layoutManager()
+        layout = manager.layoutByName(name)
+        if not layout:
+            raise Exception(f"Layout not found: {name}")
+        return layout
+
+    def _layout_item_by_id(self, layout, item_id, expected_type=None):
+        for item in layout.items():
+            if hasattr(item, "id") and item.id() == item_id:
+                if expected_type and not isinstance(item, expected_type):
+                    raise Exception(f"Layout item is not a {expected_type.__name__}: {item_id}")
+                return item
+        raise Exception(f"Layout item not found: {item_id}")
+
+    def _first_layout_map(self, layout):
+        for item in layout.items():
+            if isinstance(item, QgsLayoutItemMap):
+                return item
+        raise Exception(f"No map item found in layout: {layout.name()}")
+
+    def _set_layout_item_id(self, item, item_id):
+        if item_id and hasattr(item, "setId"):
+            item.setId(item_id)
+        return item.id() if hasattr(item, "id") else item_id
     
     def add_vector_layer(self, path, name=None, provider="ogr", **kwargs):
         """Add a vector layer to the project"""
@@ -309,6 +396,47 @@ class QgisMCPServer(QObject):
             return {"removed": layer_id}
         else:
             raise Exception(f"Layer not found: {layer_id}")
+
+    def set_layer_visibility(self, layer_id, visible, **kwargs):
+        """Set whether a layer is visible in the layer tree."""
+        layer = self._get_layer(layer_id)
+        node = QgsProject.instance().layerTreeRoot().findLayer(layer.id())
+        if not node:
+            raise Exception(f"Layer tree node not found: {layer_id}")
+
+        node.setItemVisibilityChecked(bool(visible))
+        if self.iface:
+            self.iface.mapCanvas().refresh()
+
+        return {
+            "layer_id": layer_id,
+            "name": layer.name(),
+            "visible": node.isVisible()
+        }
+
+    def set_layer_opacity(self, layer_id, opacity, **kwargs):
+        """Set layer opacity between 0 and 1."""
+        layer = self._get_layer(layer_id)
+        opacity = float(opacity)
+        if opacity < 0 or opacity > 1:
+            raise Exception("Opacity must be between 0 and 1")
+
+        if hasattr(layer, "setOpacity"):
+            layer.setOpacity(opacity)
+        elif layer.renderer() and hasattr(layer.renderer(), "setOpacity"):
+            layer.renderer().setOpacity(opacity)
+        else:
+            raise Exception(f"Layer does not support opacity changes: {layer_id}")
+
+        self._refresh_layer(layer)
+        return {"layer_id": layer_id, "name": layer.name(), "opacity": opacity}
+
+    def rename_layer(self, layer_id, name, **kwargs):
+        """Rename a layer in the current project."""
+        layer = self._get_layer(layer_id)
+        old_name = layer.name()
+        layer.setName(name)
+        return {"layer_id": layer_id, "old_name": old_name, "name": layer.name()}
     
     def zoom_to_layer(self, layer_id, **kwargs):
         """Zoom to a layer's extent"""
@@ -321,6 +449,28 @@ class QgisMCPServer(QObject):
             return {"zoomed_to": layer_id}
         else:
             raise Exception(f"Layer not found: {layer_id}")
+
+    def zoom_to_extent(self, xmin, ymin, xmax, ymax, crs=None, **kwargs):
+        """Zoom the map canvas to an explicit extent."""
+        rect = QgsRectangle(float(xmin), float(ymin), float(xmax), float(ymax))
+        if crs:
+            source_crs = QgsCoordinateReferenceSystem(crs)
+            dest_crs = self.iface.mapCanvas().mapSettings().destinationCrs()
+            if source_crs.isValid() and dest_crs.isValid() and source_crs != dest_crs:
+                transform = QgsCoordinateTransform(source_crs, dest_crs, QgsProject.instance())
+                rect = transform.transformBoundingBox(rect)
+
+        self.iface.mapCanvas().setExtent(rect)
+        self.iface.mapCanvas().refresh()
+        return {
+            "extent": {
+                "xmin": rect.xMinimum(),
+                "ymin": rect.yMinimum(),
+                "xmax": rect.xMaximum(),
+                "ymax": rect.yMaximum()
+            },
+            "crs": self.iface.mapCanvas().mapSettings().destinationCrs().authid()
+        }
     
     def get_layer_features(self, layer_id, limit=10, **kwargs):
         """Get features from a vector layer"""
@@ -364,6 +514,248 @@ class QgisMCPServer(QObject):
             }
         else:
             raise Exception(f"Layer not found: {layer_id}")
+
+    def get_layer_fields(self, layer_id, **kwargs):
+        """Get vector layer field definitions."""
+        layer = self._get_vector_layer(layer_id)
+        fields = []
+        for field in layer.fields():
+            fields.append({
+                "name": field.name(),
+                "type": field.typeName(),
+                "length": field.length(),
+                "precision": field.precision(),
+                "comment": field.comment()
+            })
+
+        return {"layer_id": layer_id, "fields": fields}
+
+    def get_layer_statistics(self, layer_id, field_name, **kwargs):
+        """Get summary statistics for a numeric vector field."""
+        layer = self._get_vector_layer(layer_id)
+        self._field_index(layer, field_name)
+
+        values = []
+        for feature in layer.getFeatures():
+            value = feature.attribute(field_name)
+            if value is not None:
+                try:
+                    values.append(float(value))
+                except (TypeError, ValueError):
+                    pass
+
+        if not values:
+            return {
+                "layer_id": layer_id,
+                "field_name": field_name,
+                "count": 0,
+                "message": "No numeric values found"
+            }
+
+        values.sort()
+        count = len(values)
+        total = sum(values)
+        mean = total / count
+        median = values[count // 2] if count % 2 else (values[count // 2 - 1] + values[count // 2]) / 2
+
+        return {
+            "layer_id": layer_id,
+            "field_name": field_name,
+            "count": count,
+            "min": values[0],
+            "max": values[-1],
+            "sum": total,
+            "mean": mean,
+            "median": median
+        }
+
+    def select_features_by_expression(self, layer_id, expression, mode="replace", **kwargs):
+        """Select vector features using a QGIS expression."""
+        layer = self._get_vector_layer(layer_id)
+        behavior_map = {
+            "replace": QgsVectorLayer.SetSelection,
+            "add": QgsVectorLayer.AddToSelection,
+            "remove": QgsVectorLayer.RemoveFromSelection,
+            "intersect": QgsVectorLayer.IntersectSelection,
+        }
+        behavior = behavior_map.get(mode)
+        if behavior is None:
+            raise Exception("Selection mode must be one of: replace, add, remove, intersect")
+
+        layer.selectByExpression(expression, behavior)
+        selected_ids = layer.selectedFeatureIds()
+
+        return {
+            "layer_id": layer_id,
+            "selected_count": len(selected_ids),
+            "selected_feature_ids": selected_ids[:1000],
+            "truncated": len(selected_ids) > 1000
+        }
+
+    def edit_attribute(self, layer_id, feature_id, field_name, value, commit=True, **kwargs):
+        """Edit a single feature attribute."""
+        layer = self._get_vector_layer(layer_id)
+        field_index = self._field_index(layer, field_name)
+        feature_id = int(feature_id)
+        was_editing = layer.isEditable()
+
+        if not was_editing and not layer.startEditing():
+            raise Exception(f"Could not start editing layer: {layer.name()}")
+
+        if not layer.changeAttributeValue(feature_id, field_index, value):
+            if not was_editing:
+                layer.rollBack()
+            raise Exception(f"Failed to update feature {feature_id} field {field_name}")
+
+        committed = False
+        if commit and not was_editing:
+            if not layer.commitChanges():
+                errors = layer.commitErrors()
+                layer.rollBack()
+                raise Exception(f"Failed to commit changes: {errors}")
+            committed = True
+
+        self._refresh_layer(layer)
+        return {
+            "layer_id": layer_id,
+            "feature_id": feature_id,
+            "field_name": field_name,
+            "value": value,
+            "committed": committed,
+            "editing": layer.isEditable()
+        }
+
+    def run_expression(self, expression, layer_id=None, feature_id=None, **kwargs):
+        """Evaluate a QGIS expression in project, layer, or feature context."""
+        qgs_expression = QgsExpression(expression)
+        if qgs_expression.hasParserError():
+            raise Exception(qgs_expression.parserErrorString())
+
+        context = QgsExpressionContext()
+        scopes = [
+            QgsExpressionContextUtils.globalScope(),
+            QgsExpressionContextUtils.projectScope(QgsProject.instance())
+        ]
+        layer = None
+
+        if layer_id:
+            layer = self._get_vector_layer(layer_id)
+            scopes.append(QgsExpressionContextUtils.layerScope(layer))
+
+        context.appendScopes(scopes)
+
+        if layer and feature_id is not None:
+            request = QgsFeatureRequest(int(feature_id))
+            feature = next(layer.getFeatures(request), None)
+            if not feature:
+                raise Exception(f"Feature not found: {feature_id}")
+            context.setFeature(feature)
+            context.setFields(layer.fields())
+
+        value = qgs_expression.evaluate(context)
+        if qgs_expression.hasEvalError():
+            raise Exception(qgs_expression.evalErrorString())
+
+        return {
+            "expression": expression,
+            "value": value,
+            "value_type": type(value).__name__
+        }
+
+    def style_layer(self, layer_id, color="#3388ff", outline_color=None, opacity=1.0, line_width=0.5, marker_size=2.0, **kwargs):
+        """Apply a simple single-symbol style to a vector layer or opacity to a raster layer."""
+        layer = self._get_layer(layer_id)
+        opacity = float(opacity)
+        if opacity < 0 or opacity > 1:
+            raise Exception("Opacity must be between 0 and 1")
+
+        if layer.type() == QgsMapLayer.RasterLayer:
+            return self.set_layer_opacity(layer_id, opacity)
+
+        if layer.type() != QgsMapLayer.VectorLayer:
+            raise Exception(f"Unsupported layer type for styling: {layer_id}")
+
+        symbol = QgsSymbol.defaultSymbol(layer.geometryType())
+        if not symbol:
+            raise Exception(f"Could not create a default symbol for layer: {layer_id}")
+
+        symbol.setColor(self._parse_color(color))
+        symbol.setOpacity(opacity)
+
+        if hasattr(symbol, "setSize"):
+            symbol.setSize(float(marker_size))
+        if hasattr(symbol, "setWidth"):
+            symbol.setWidth(float(line_width))
+
+        for symbol_layer in symbol.symbolLayers():
+            if outline_color and hasattr(symbol_layer, "setStrokeColor"):
+                symbol_layer.setStrokeColor(self._parse_color(outline_color))
+            if hasattr(symbol_layer, "setStrokeWidth"):
+                symbol_layer.setStrokeWidth(float(line_width))
+
+        layer.setRenderer(QgsSingleSymbolRenderer(symbol))
+        self._refresh_layer(layer)
+
+        return {
+            "layer_id": layer_id,
+            "name": layer.name(),
+            "renderer": "single_symbol",
+            "color": color,
+            "outline_color": outline_color,
+            "opacity": opacity
+        }
+
+    def set_graduated_renderer(self, layer_id, field_name, classes=5, mode="quantile", color_ramp="Spectral", opacity=1.0, **kwargs):
+        """Apply a graduated renderer to a vector layer."""
+        layer = self._get_vector_layer(layer_id)
+        self._field_index(layer, field_name)
+
+        mode_map = {
+            "equal_interval": QgsGraduatedSymbolRenderer.EqualInterval,
+            "quantile": QgsGraduatedSymbolRenderer.Quantile,
+            "natural_breaks": QgsGraduatedSymbolRenderer.Jenks,
+            "jenks": QgsGraduatedSymbolRenderer.Jenks,
+            "pretty": QgsGraduatedSymbolRenderer.Pretty,
+            "stddev": QgsGraduatedSymbolRenderer.StdDev,
+        }
+        mode_enum = mode_map.get(mode)
+        if mode_enum is None:
+            raise Exception("Mode must be one of: equal_interval, quantile, natural_breaks, jenks, pretty, stddev")
+
+        symbol = QgsSymbol.defaultSymbol(layer.geometryType())
+        if not symbol:
+            raise Exception(f"Could not create a default symbol for layer: {layer_id}")
+        symbol.setOpacity(float(opacity))
+
+        ramp = QgsStyle.defaultStyle().colorRamp(color_ramp)
+        if not ramp:
+            ramp_names = QgsStyle.defaultStyle().colorRampNames()
+            raise Exception(f"Color ramp not found: {color_ramp}. Available examples: {ramp_names[:20]}")
+
+        renderer = QgsGraduatedSymbolRenderer()
+        renderer.setClassAttribute(field_name)
+        renderer.setSourceSymbol(symbol)
+        renderer.setSourceColorRamp(ramp)
+        renderer.updateClasses(layer, mode_enum, int(classes))
+        layer.setRenderer(renderer)
+        self._refresh_layer(layer)
+
+        ranges = []
+        for renderer_range in renderer.ranges():
+            ranges.append({
+                "lower": renderer_range.lowerValue(),
+                "upper": renderer_range.upperValue(),
+                "label": renderer_range.label()
+            })
+
+        return {
+            "layer_id": layer_id,
+            "field_name": field_name,
+            "classes": int(classes),
+            "mode": mode,
+            "color_ramp": color_ramp,
+            "ranges": ranges
+        }
     
     def execute_processing(self, algorithm, parameters, **kwargs):
         """Execute a processing algorithm"""
@@ -376,6 +768,355 @@ class QgisMCPServer(QObject):
             }
         except Exception as e:
             raise Exception(f"Processing error: {str(e)}")
+
+    def set_project_crs(self, crs, **kwargs):
+        """Set the current project's coordinate reference system."""
+        qgs_crs = QgsCoordinateReferenceSystem(crs)
+        if not qgs_crs.isValid():
+            raise Exception(f"Invalid CRS: {crs}")
+
+        project = QgsProject.instance()
+        project.setCrs(qgs_crs)
+        if self.iface:
+            self.iface.mapCanvas().setDestinationCrs(qgs_crs)
+            self.iface.mapCanvas().refresh()
+
+        return {"crs": project.crs().authid(), "description": project.crs().description()}
+
+    def create_layout(self, name, page_size="A4", orientation="landscape", add_map=True, overwrite=False, **kwargs):
+        """Create a QGIS print layout with an optional map item."""
+        project = QgsProject.instance()
+        manager = project.layoutManager()
+        existing = manager.layoutByName(name)
+        if existing:
+            if not overwrite:
+                raise Exception(f"Layout already exists: {name}")
+            manager.removeLayout(existing)
+
+        layout = QgsPrintLayout(project)
+        layout.initializeDefaults()
+        layout.setName(name)
+
+        page = layout.pageCollection().page(0)
+        if page:
+            size = QgsLayoutSize(297, 210, QgsUnitTypes.LayoutMillimeters)
+            if page_size.upper() == "A4" and orientation == "portrait":
+                size = QgsLayoutSize(210, 297, QgsUnitTypes.LayoutMillimeters)
+            page.attemptResize(size)
+
+        if add_map:
+            map_item = QgsLayoutItemMap(layout)
+            map_item.setRect(20, 20, 250, 160)
+            if self.iface:
+                map_item.setExtent(self.iface.mapCanvas().extent())
+            layout.addLayoutItem(map_item)
+            map_item.attemptMove(QgsLayoutPoint(15, 20, QgsUnitTypes.LayoutMillimeters))
+            map_item.attemptResize(QgsLayoutSize(267, 170, QgsUnitTypes.LayoutMillimeters))
+
+        manager.addLayout(layout)
+        return {
+            "name": name,
+            "layout_count": len(manager.layouts()),
+            "add_map": bool(add_map)
+        }
+
+    def list_layouts(self, **kwargs):
+        """List print layouts in the current project."""
+        layouts = []
+        for layout in QgsProject.instance().layoutManager().layouts():
+            atlas = layout.atlas() if hasattr(layout, "atlas") else None
+            items = []
+            for item in layout.items():
+                item_type = type(item).__name__
+                item_id = item.id() if hasattr(item, "id") else ""
+                items.append({"type": item_type, "id": item_id})
+
+            layouts.append({
+                "name": layout.name(),
+                "item_count": len(layout.items()),
+                "atlas_enabled": bool(atlas and atlas.enabled()),
+                "items": items[:50],
+                "items_truncated": len(items) > 50
+            })
+
+        return {"layouts": layouts, "layout_count": len(layouts)}
+
+    def add_layout_map(self, layout_name, item_id=None, x=10, y=10, width=180, height=160, layer_ids=None, extent=None, crs=None, atlas_driven=False, atlas_margin=0.10, **kwargs):
+        """Add a map item to a print layout."""
+        layout = self._layout_by_name(layout_name)
+        map_item = QgsLayoutItemMap(layout)
+        map_item.setRect(20, 20, float(width), float(height))
+
+        if layer_ids:
+            layers = [self._get_layer(layer_id) for layer_id in layer_ids]
+            map_item.setLayers(layers)
+
+        if extent:
+            rect = QgsRectangle(float(extent["xmin"]), float(extent["ymin"]), float(extent["xmax"]), float(extent["ymax"]))
+            if crs:
+                source_crs = QgsCoordinateReferenceSystem(crs)
+                dest_crs = QgsProject.instance().crs()
+                if source_crs.isValid() and dest_crs.isValid() and source_crs != dest_crs:
+                    transform = QgsCoordinateTransform(source_crs, dest_crs, QgsProject.instance())
+                    rect = transform.transformBoundingBox(rect)
+            map_item.setExtent(rect)
+        elif self.iface:
+            map_item.setExtent(self.iface.mapCanvas().extent())
+
+        if atlas_driven:
+            map_item.setAtlasDriven(True)
+            if hasattr(map_item, "setAtlasScalingMode"):
+                map_item.setAtlasScalingMode(QgsLayoutItemMap.Auto)
+            if hasattr(map_item, "setAtlasMargin"):
+                map_item.setAtlasMargin(float(atlas_margin))
+
+        layout.addLayoutItem(map_item)
+        map_item.attemptMove(QgsLayoutPoint(float(x), float(y), QgsUnitTypes.LayoutMillimeters))
+        map_item.attemptResize(QgsLayoutSize(float(width), float(height), QgsUnitTypes.LayoutMillimeters))
+        final_id = self._set_layout_item_id(map_item, item_id or "main_map")
+
+        return {
+            "layout": layout_name,
+            "item_id": final_id,
+            "atlas_driven": bool(atlas_driven),
+            "x": float(x),
+            "y": float(y),
+            "width": float(width),
+            "height": float(height)
+        }
+
+    def add_layout_label(self, layout_name, text, x=10, y=10, width=100, height=20, font_size=12, **kwargs):
+        """Add a text label item to a print layout."""
+        layout = self._layout_by_name(layout_name)
+        label = QgsLayoutItemLabel(layout)
+        label.setText(text)
+        label.setFont(QFont("Arial", int(font_size)))
+        label.adjustSizeToText()
+        layout.addLayoutItem(label)
+        label.attemptMove(QgsLayoutPoint(float(x), float(y), QgsUnitTypes.LayoutMillimeters))
+        label.attemptResize(QgsLayoutSize(float(width), float(height), QgsUnitTypes.LayoutMillimeters))
+
+        return {
+            "layout": layout_name,
+            "text": text,
+            "x": float(x),
+            "y": float(y),
+            "width": float(width),
+            "height": float(height),
+            "font_size": int(font_size)
+        }
+
+    def add_layout_legend(self, layout_name, title="Legend", x=10, y=40, width=60, height=80, **kwargs):
+        """Add a legend item to a print layout."""
+        layout = self._layout_by_name(layout_name)
+        legend = QgsLayoutItemLegend(layout)
+        legend.setTitle(title)
+        legend.setLinkedMap(None)
+        legend.model().setRootGroup(QgsProject.instance().layerTreeRoot())
+        layout.addLayoutItem(legend)
+        legend.attemptMove(QgsLayoutPoint(float(x), float(y), QgsUnitTypes.LayoutMillimeters))
+        legend.attemptResize(QgsLayoutSize(float(width), float(height), QgsUnitTypes.LayoutMillimeters))
+
+        return {
+            "layout": layout_name,
+            "title": title,
+            "x": float(x),
+            "y": float(y),
+            "width": float(width),
+            "height": float(height)
+        }
+
+    def add_layout_picture(self, layout_name, path, item_id=None, x=10, y=10, width=30, height=30, **kwargs):
+        """Add a picture/logo/SVG item to a print layout."""
+        if not os.path.exists(path):
+            raise Exception(f"Picture path does not exist: {path}")
+
+        layout = self._layout_by_name(layout_name)
+        picture = QgsLayoutItemPicture(layout)
+        picture.setPicturePath(path)
+        layout.addLayoutItem(picture)
+        picture.attemptMove(QgsLayoutPoint(float(x), float(y), QgsUnitTypes.LayoutMillimeters))
+        picture.attemptResize(QgsLayoutSize(float(width), float(height), QgsUnitTypes.LayoutMillimeters))
+        final_id = self._set_layout_item_id(picture, item_id)
+
+        return {
+            "layout": layout_name,
+            "item_id": final_id,
+            "path": path,
+            "x": float(x),
+            "y": float(y),
+            "width": float(width),
+            "height": float(height)
+        }
+
+    def add_layout_scale_bar(self, layout_name, map_item_id=None, style="Single Box", units="meters", x=10, y=180, width=60, height=15, units_per_segment=100, segments=2, left_segments=0, **kwargs):
+        """Add a scale bar linked to a layout map item."""
+        layout = self._layout_by_name(layout_name)
+        map_item = self._layout_item_by_id(layout, map_item_id, QgsLayoutItemMap) if map_item_id else self._first_layout_map(layout)
+
+        scale_bar = QgsLayoutItemScaleBar(layout)
+        scale_bar.setStyle(style)
+        scale_bar.setLinkedMap(map_item)
+        scale_bar.setUnits(QgsUnitTypes.DistanceKilometers if units == "kilometers" else QgsUnitTypes.DistanceMeters)
+        scale_bar.setUnitsPerSegment(float(units_per_segment))
+        scale_bar.setNumberOfSegments(int(segments))
+        scale_bar.setNumberOfSegmentsLeft(int(left_segments))
+        layout.addLayoutItem(scale_bar)
+        scale_bar.attemptMove(QgsLayoutPoint(float(x), float(y), QgsUnitTypes.LayoutMillimeters))
+        scale_bar.attemptResize(QgsLayoutSize(float(width), float(height), QgsUnitTypes.LayoutMillimeters))
+        scale_bar.update()
+
+        return {
+            "layout": layout_name,
+            "map_item_id": map_item.id() if hasattr(map_item, "id") else map_item_id,
+            "style": style,
+            "units": units,
+            "units_per_segment": float(units_per_segment),
+            "segments": int(segments)
+        }
+
+    def configure_atlas(self, layout_name, coverage_layer_id, enabled=True, hide_coverage=True, page_name_expression=None, filter_expression=None, sort_expression=None, sort_ascending=True, filename_expression=None, map_item_id=None, **kwargs):
+        """Configure atlas generation for a print layout."""
+        layout = self._layout_by_name(layout_name)
+        coverage_layer = self._get_vector_layer(coverage_layer_id)
+        atlas = layout.atlas()
+
+        atlas.setEnabled(bool(enabled))
+        atlas.setCoverageLayer(coverage_layer)
+        atlas.setHideCoverage(bool(hide_coverage))
+
+        if page_name_expression is not None:
+            atlas.setPageNameExpression(page_name_expression)
+        if filename_expression is not None:
+            atlas.setFilenameExpression(filename_expression)
+        if filter_expression:
+            atlas.setFilterFeatures(True)
+            atlas.setFilterExpression(filter_expression)
+        else:
+            atlas.setFilterFeatures(False)
+        if sort_expression:
+            atlas.setSortFeatures(True)
+            atlas.setSortExpression(sort_expression)
+            atlas.setSortAscending(bool(sort_ascending))
+        else:
+            atlas.setSortFeatures(False)
+
+        if map_item_id:
+            map_item = self._layout_item_by_id(layout, map_item_id, QgsLayoutItemMap)
+        else:
+            map_item = None
+            try:
+                map_item = self._first_layout_map(layout)
+            except Exception:
+                map_item = None
+
+        if map_item:
+            map_item.setAtlasDriven(True)
+            if hasattr(map_item, "setAtlasScalingMode"):
+                map_item.setAtlasScalingMode(QgsLayoutItemMap.Auto)
+
+        return {
+            "layout": layout_name,
+            "enabled": atlas.enabled(),
+            "coverage_layer_id": coverage_layer_id,
+            "coverage_layer_name": coverage_layer.name(),
+            "hide_coverage": bool(hide_coverage),
+            "page_name_expression": page_name_expression,
+            "filter_expression": filter_expression,
+            "sort_expression": sort_expression,
+            "filename_expression": filename_expression,
+            "map_item_id": map_item.id() if map_item and hasattr(map_item, "id") else None
+        }
+
+    def get_atlas_info(self, layout_name, **kwargs):
+        """Get atlas configuration information for a layout."""
+        layout = self._layout_by_name(layout_name)
+        atlas = layout.atlas()
+        coverage_layer = atlas.coverageLayer()
+
+        return {
+            "layout": layout_name,
+            "enabled": atlas.enabled(),
+            "coverage_layer_id": coverage_layer.id() if coverage_layer else None,
+            "coverage_layer_name": coverage_layer.name() if coverage_layer else None,
+            "hide_coverage": atlas.hideCoverage(),
+            "page_name_expression": atlas.pageNameExpression(),
+            "filter_features": atlas.filterFeatures(),
+            "filter_expression": atlas.filterExpression(),
+            "sort_features": atlas.sortFeatures(),
+            "sort_expression": atlas.sortExpression(),
+            "sort_ascending": atlas.sortAscending(),
+            "filename_expression": atlas.filenameExpression()
+        }
+
+    def export_layout(self, name, path, format=None, dpi=300, **kwargs):
+        """Export a QGIS print layout to PDF, image, or SVG."""
+        layout = self._layout_by_name(name)
+        exporter = QgsLayoutExporter(layout)
+        export_format = (format or os.path.splitext(path)[1].lstrip(".") or "pdf").lower()
+
+        if export_format == "pdf":
+            settings = QgsLayoutExporter.PdfExportSettings()
+            result = exporter.exportToPdf(path, settings)
+        elif export_format in {"png", "jpg", "jpeg", "tif", "tiff"}:
+            settings = QgsLayoutExporter.ImageExportSettings()
+            settings.dpi = int(dpi)
+            result = exporter.exportToImage(path, settings)
+        elif export_format == "svg":
+            settings = QgsLayoutExporter.SvgExportSettings()
+            result = exporter.exportToSvg(path, settings)
+        else:
+            raise Exception("Format must be one of: pdf, png, jpg, jpeg, tif, tiff, svg")
+
+        if result != QgsLayoutExporter.Success:
+            raise Exception(f"Layout export failed with code: {result}")
+
+        return {"layout": name, "path": path, "format": export_format, "dpi": int(dpi)}
+
+    def export_atlas(self, layout_name, path, format=None, dpi=300, **kwargs):
+        """Export all pages from a configured layout atlas."""
+        layout = self._layout_by_name(layout_name)
+        atlas = layout.atlas()
+        if not atlas.enabled():
+            raise Exception(f"Atlas is not enabled for layout: {layout_name}")
+        if not atlas.coverageLayer():
+            raise Exception(f"Atlas coverage layer is not configured for layout: {layout_name}")
+
+        exporter = QgsLayoutExporter(layout)
+        export_format = (format or os.path.splitext(path)[1].lstrip(".") or "pdf").lower()
+
+        if export_format == "pdf":
+            settings = QgsLayoutExporter.PdfExportSettings()
+            result = exporter.exportToPdf(atlas, path, settings)
+        elif export_format in {"png", "jpg", "jpeg", "tif", "tiff"}:
+            settings = QgsLayoutExporter.ImageExportSettings()
+            settings.dpi = int(dpi)
+            base_path, extension = os.path.splitext(path)
+            extension = extension.lstrip(".") or export_format
+            result = exporter.exportToImage(atlas, base_path, extension, settings)
+        else:
+            raise Exception("Atlas format must be one of: pdf, png, jpg, jpeg, tif, tiff")
+
+        if result != QgsLayoutExporter.Success:
+            raise Exception(f"Atlas export failed with code: {result}")
+
+        return {
+            "layout": layout_name,
+            "path": path,
+            "format": export_format,
+            "dpi": int(dpi),
+            "coverage_layer": atlas.coverageLayer().name()
+        }
+
+    def remove_layout(self, name, **kwargs):
+        """Remove a print layout from the current project."""
+        manager = QgsProject.instance().layoutManager()
+        layout = manager.layoutByName(name)
+        if not layout:
+            raise Exception(f"Layout not found: {name}")
+
+        manager.removeLayout(layout)
+        return {"removed": name, "layout_count": len(manager.layouts())}
     
     def save_project(self, path=None, **kwargs):
         """Save the current project"""
@@ -469,7 +1210,7 @@ class QgisMCPServer(QObject):
 
 
 MCP_SERVER_NAME = "QGIS MCP HTTP"
-MCP_SERVER_VERSION = "0.1.1"
+MCP_SERVER_VERSION = "0.3.0"
 SUPPORTED_MCP_PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 
 MCP_TOOLS = [
@@ -562,6 +1303,22 @@ MCP_TOOLS = [
         },
     },
     {
+        "name": "zoom_to_extent",
+        "description": "Zoom the map canvas to an explicit extent, optionally transforming from a source CRS.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "xmin": {"type": "number"},
+                "ymin": {"type": "number"},
+                "xmax": {"type": "number"},
+                "ymax": {"type": "number"},
+                "crs": {"type": "string"},
+            },
+            "required": ["xmin", "ymin", "xmax", "ymax"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "get_layer_features",
         "description": "Retrieve features from a vector layer with an optional limit.",
         "inputSchema": {
@@ -575,6 +1332,154 @@ MCP_TOOLS = [
         },
     },
     {
+        "name": "get_layer_fields",
+        "description": "Retrieve field definitions for a vector layer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"layer_id": {"type": "string"}},
+            "required": ["layer_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_layer_statistics",
+        "description": "Calculate summary statistics for a numeric vector layer field.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "field_name": {"type": "string"},
+            },
+            "required": ["layer_id", "field_name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "set_layer_visibility",
+        "description": "Set whether a layer is visible in the layer tree.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "visible": {"type": "boolean"},
+            },
+            "required": ["layer_id", "visible"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "set_layer_opacity",
+        "description": "Set layer opacity between 0 and 1.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+            },
+            "required": ["layer_id", "opacity"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "rename_layer",
+        "description": "Rename a layer in the current project.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "name": {"type": "string"},
+            },
+            "required": ["layer_id", "name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "style_layer",
+        "description": "Apply a simple single-symbol style to a vector layer, or opacity to a raster layer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "color": {"type": "string", "default": "#3388ff"},
+                "outline_color": {"type": "string"},
+                "opacity": {"type": "number", "default": 1, "minimum": 0, "maximum": 1},
+                "line_width": {"type": "number", "default": 0.5, "minimum": 0},
+                "marker_size": {"type": "number", "default": 2, "minimum": 0},
+            },
+            "required": ["layer_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "set_graduated_renderer",
+        "description": "Apply a graduated renderer to a vector layer field.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "field_name": {"type": "string"},
+                "classes": {"type": "integer", "default": 5, "minimum": 2, "maximum": 20},
+                "mode": {
+                    "type": "string",
+                    "default": "quantile",
+                    "enum": ["equal_interval", "quantile", "natural_breaks", "jenks", "pretty", "stddev"]
+                },
+                "color_ramp": {"type": "string", "default": "Spectral"},
+                "opacity": {"type": "number", "default": 1, "minimum": 0, "maximum": 1},
+            },
+            "required": ["layer_id", "field_name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "select_features_by_expression",
+        "description": "Select vector features using a QGIS expression.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "expression": {"type": "string"},
+                "mode": {
+                    "type": "string",
+                    "default": "replace",
+                    "enum": ["replace", "add", "remove", "intersect"]
+                },
+            },
+            "required": ["layer_id", "expression"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "edit_attribute",
+        "description": "Edit a single feature attribute on a vector layer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layer_id": {"type": "string"},
+                "feature_id": {"type": "integer"},
+                "field_name": {"type": "string"},
+                "value": {},
+                "commit": {"type": "boolean", "default": True},
+            },
+            "required": ["layer_id", "feature_id", "field_name", "value"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "run_expression",
+        "description": "Evaluate a QGIS expression in project, layer, or feature context.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "expression": {"type": "string"},
+                "layer_id": {"type": "string"},
+                "feature_id": {"type": "integer"},
+            },
+            "required": ["expression"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "execute_processing",
         "description": "Execute a processing algorithm with the given parameters.",
         "inputSchema": {
@@ -584,6 +1489,215 @@ MCP_TOOLS = [
                 "parameters": {"type": "object"},
             },
             "required": ["algorithm", "parameters"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "set_project_crs",
+        "description": "Set the current project's coordinate reference system.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"crs": {"type": "string"}},
+            "required": ["crs"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "create_layout",
+        "description": "Create a QGIS print layout with an optional map item.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "page_size": {"type": "string", "default": "A4"},
+                "orientation": {"type": "string", "default": "landscape", "enum": ["landscape", "portrait"]},
+                "add_map": {"type": "boolean", "default": True},
+                "overwrite": {"type": "boolean", "default": False},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "add_layout_map",
+        "description": "Add a map item to a print layout, optionally atlas-driven.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layout_name": {"type": "string"},
+                "item_id": {"type": "string"},
+                "x": {"type": "number", "default": 10},
+                "y": {"type": "number", "default": 10},
+                "width": {"type": "number", "default": 180, "minimum": 1},
+                "height": {"type": "number", "default": 160, "minimum": 1},
+                "layer_ids": {"type": "array", "items": {"type": "string"}},
+                "extent": {
+                    "type": "object",
+                    "properties": {
+                        "xmin": {"type": "number"},
+                        "ymin": {"type": "number"},
+                        "xmax": {"type": "number"},
+                        "ymax": {"type": "number"},
+                    },
+                    "required": ["xmin", "ymin", "xmax", "ymax"],
+                    "additionalProperties": False,
+                },
+                "crs": {"type": "string"},
+                "atlas_driven": {"type": "boolean", "default": False},
+                "atlas_margin": {"type": "number", "default": 0.10, "minimum": 0},
+            },
+            "required": ["layout_name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "list_layouts",
+        "description": "List print layouts in the current project.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "add_layout_label",
+        "description": "Add a text label item to a print layout.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layout_name": {"type": "string"},
+                "text": {"type": "string"},
+                "x": {"type": "number", "default": 10},
+                "y": {"type": "number", "default": 10},
+                "width": {"type": "number", "default": 100, "minimum": 1},
+                "height": {"type": "number", "default": 20, "minimum": 1},
+                "font_size": {"type": "integer", "default": 12, "minimum": 1},
+            },
+            "required": ["layout_name", "text"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "add_layout_legend",
+        "description": "Add a legend item to a print layout.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layout_name": {"type": "string"},
+                "title": {"type": "string", "default": "Legend"},
+                "x": {"type": "number", "default": 10},
+                "y": {"type": "number", "default": 40},
+                "width": {"type": "number", "default": 60, "minimum": 1},
+                "height": {"type": "number", "default": 80, "minimum": 1},
+            },
+            "required": ["layout_name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "add_layout_picture",
+        "description": "Add a picture, logo, or SVG item to a print layout.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layout_name": {"type": "string"},
+                "path": {"type": "string"},
+                "item_id": {"type": "string"},
+                "x": {"type": "number", "default": 10},
+                "y": {"type": "number", "default": 10},
+                "width": {"type": "number", "default": 30, "minimum": 1},
+                "height": {"type": "number", "default": 30, "minimum": 1},
+            },
+            "required": ["layout_name", "path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "add_layout_scale_bar",
+        "description": "Add a scale bar linked to a layout map item.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layout_name": {"type": "string"},
+                "map_item_id": {"type": "string"},
+                "style": {"type": "string", "default": "Single Box"},
+                "units": {"type": "string", "default": "meters", "enum": ["meters", "kilometers"]},
+                "x": {"type": "number", "default": 10},
+                "y": {"type": "number", "default": 180},
+                "width": {"type": "number", "default": 60, "minimum": 1},
+                "height": {"type": "number", "default": 15, "minimum": 1},
+                "units_per_segment": {"type": "number", "default": 100, "minimum": 0},
+                "segments": {"type": "integer", "default": 2, "minimum": 1},
+                "left_segments": {"type": "integer", "default": 0, "minimum": 0},
+            },
+            "required": ["layout_name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "configure_atlas",
+        "description": "Configure atlas generation for a print layout.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layout_name": {"type": "string"},
+                "coverage_layer_id": {"type": "string"},
+                "enabled": {"type": "boolean", "default": True},
+                "hide_coverage": {"type": "boolean", "default": True},
+                "page_name_expression": {"type": "string"},
+                "filter_expression": {"type": "string"},
+                "sort_expression": {"type": "string"},
+                "sort_ascending": {"type": "boolean", "default": True},
+                "filename_expression": {"type": "string"},
+                "map_item_id": {"type": "string"},
+            },
+            "required": ["layout_name", "coverage_layer_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_atlas_info",
+        "description": "Get atlas configuration information for a layout.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"layout_name": {"type": "string"}},
+            "required": ["layout_name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "export_layout",
+        "description": "Export a QGIS print layout to PDF, image, or SVG.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "path": {"type": "string"},
+                "format": {"type": "string", "enum": ["pdf", "png", "jpg", "jpeg", "tif", "tiff", "svg"]},
+                "dpi": {"type": "integer", "default": 300, "minimum": 1},
+            },
+            "required": ["name", "path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "export_atlas",
+        "description": "Export all pages from a configured layout atlas to PDF or images.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "layout_name": {"type": "string"},
+                "path": {"type": "string"},
+                "format": {"type": "string", "enum": ["pdf", "png", "jpg", "jpeg", "tif", "tiff"]},
+                "dpi": {"type": "integer", "default": 300, "minimum": 1},
+            },
+            "required": ["layout_name", "path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "remove_layout",
+        "description": "Remove a print layout from the current project.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
             "additionalProperties": False,
         },
     },
