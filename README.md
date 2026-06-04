@@ -15,7 +15,7 @@ This derivative is licensed under GPL-2.0.
 Create a plugin ZIP with the plugin folder at the top level:
 
 ```bash
-zip -r qgis_mcp_http-0.3.1.zip qgis_mcp_http \
+zip -r qgis_mcp_http-0.3.2.zip qgis_mcp_http \
   -x '*/__pycache__/*' '*.pyc' '*.DS_Store' '*/.git/*'
 ```
 
