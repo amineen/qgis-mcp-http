@@ -1,7 +1,7 @@
 [general]
 name=QGIS MCP HTTP
 description=Expose QGIS as a localhost Streamable HTTP MCP server for Codex, Claude, and other MCP clients.
-version=0.3.0
+version=0.3.1
 qgisMinimumVersion=3.22
 author=Aaron Mineen
 email=amineen64@hotmail.com

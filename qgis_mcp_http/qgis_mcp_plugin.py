@@ -314,6 +314,16 @@ class QgisMCPServer(QObject):
         if item_id and hasattr(item, "setId"):
             item.setId(item_id)
         return item.id() if hasattr(item, "id") else item_id
+
+    def _layout_export_code(self, result):
+        if isinstance(result, tuple):
+            return result[0]
+        return result
+
+    def _layout_export_error(self, result):
+        if isinstance(result, tuple) and len(result) > 1:
+            return result[1]
+        return ""
     
     def add_vector_layer(self, path, name=None, provider="ogr", **kwargs):
         """Add a vector layer to the project"""
@@ -824,6 +834,18 @@ class QgisMCPServer(QObject):
         """List print layouts in the current project."""
         layouts = []
         for layout in QgsProject.instance().layoutManager().layouts():
+            layout_type = type(layout).__name__
+            if not hasattr(layout, "items"):
+                layouts.append({
+                    "name": layout.name(),
+                    "type": layout_type,
+                    "item_count": 0,
+                    "atlas_enabled": False,
+                    "items": [],
+                    "items_truncated": False
+                })
+                continue
+
             atlas = layout.atlas() if hasattr(layout, "atlas") else None
             items = []
             for item in layout.items():
@@ -833,6 +855,7 @@ class QgisMCPServer(QObject):
 
             layouts.append({
                 "name": layout.name(),
+                "type": layout_type,
                 "item_count": len(layout.items()),
                 "atlas_enabled": bool(atlas and atlas.enabled()),
                 "items": items[:50],
@@ -1068,8 +1091,11 @@ class QgisMCPServer(QObject):
         else:
             raise Exception("Format must be one of: pdf, png, jpg, jpeg, tif, tiff, svg")
 
-        if result != QgsLayoutExporter.Success:
-            raise Exception(f"Layout export failed with code: {result}")
+        result_code = self._layout_export_code(result)
+        if result_code != QgsLayoutExporter.Success:
+            error = self._layout_export_error(result)
+            detail = f": {error}" if error else ""
+            raise Exception(f"Layout export failed with code: {result_code}{detail}")
 
         return {"layout": name, "path": path, "format": export_format, "dpi": int(dpi)}
 
@@ -1097,8 +1123,11 @@ class QgisMCPServer(QObject):
         else:
             raise Exception("Atlas format must be one of: pdf, png, jpg, jpeg, tif, tiff")
 
-        if result != QgsLayoutExporter.Success:
-            raise Exception(f"Atlas export failed with code: {result}")
+        result_code = self._layout_export_code(result)
+        if result_code != QgsLayoutExporter.Success:
+            error = self._layout_export_error(result)
+            detail = f": {error}" if error else ""
+            raise Exception(f"Atlas export failed with code: {result_code}{detail}")
 
         return {
             "layout": layout_name,
